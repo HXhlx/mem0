@@ -1,0 +1,235 @@
+---
+title: Self-Hosted Agents (OpenClaw & Hermes)
+description: Connect AI agents like OpenClaw and Hermes to your self-hosted Mem0 server
+---
+
+This guide shows how to connect AI agents — specifically **OpenClaw** and **Hermes** — to a self-hosted Mem0 server (the FastAPI service under `server/`) instead of the hosted platform at `api.mem0.ai`.
+
+## Why self-hosted?
+
+- **Data sovereignty** — memories stay on your infrastructure
+- **Cost** — no subscription; pay only for the LLM/embedder you choose
+- **Customization** — pin LLM/embedder providers, swap vector stores, control retention
+
+## Prerequisites
+
+1. A running self-hosted Mem0 server (see `server/README.md`):
+   ```bash
+   cd server
+   docker compose up -d
+   ```
+   Default URL: `http://localhost:8888`
+
+2. An API key. Two options:
+   - **Recommended**: set `ADMIN_API_KEY=m0sk_<random>` in `server/.env`. This key works from day one without any registration.
+   - **Per-user**: register at `http://localhost:3000/setup`, then create a key via `POST /api-keys`.
+
+## SDK Compatibility
+
+The self-hosted server understands the same `MemoryClient` SDK calls as the hosted platform:
+
+```python
+from mem0 import MemoryClient
+
+# Hosted platform (default)
+client = MemoryClient(api_key="m0_xxx")
+
+# Self-hosted server
+client = MemoryClient(api_key="m0sk_xxx", host="http://localhost:8888")
+```
+
+```typescript
+import { MemoryClient } from "mem0ai";
+
+// Self-hosted
+const client = new MemoryClient({
+  apiKey: "m0sk_xxx",
+  host: "http://localhost:8888",
+});
+```
+
+All core methods work: `add`, `search`, `get`, `getAll`, `update`, `delete`, `history`, `users`.
+
+Not supported on self-hosted: `batch_update`, `batch_delete`, `exports`, `feedback`, `webhooks`, organisation/project management.
+
+## OpenClaw
+
+OpenClaw supports three modes via the `mode` field in its plugin config:
+
+| Mode | Description |
+|------|-------------|
+| `platform` | Default. Talks to `api.mem0.ai`. Requires `apiKey`. |
+| `server` | Talks to a self-hosted Mem0 server. Requires `apiKey` + `baseUrl`. |
+| `open-source` | Runs the `Memory` class in-process. Requires `oss.embedder`, `oss.llm`, `oss.vectorStore`. |
+
+### Server mode configuration
+
+In your `openclaw.json`:
+
+```json
+{
+  "plugins": {
+    "openclaw-mem0": {
+      "mode": "server",
+      "apiKey": "m0sk_xxx",
+      "baseUrl": "http://localhost:8888",
+      "userId": "my-username"
+    }
+  }
+}
+```
+
+Server mode uses the same wire protocol as platform mode (`MemoryClient` over HTTP), but points at your self-hosted server. All 8 OpenClaw tools (`memory_search`, `memory_add`, etc.) work transparently.
+
+## Hermes
+
+Hermes loads its mem0 plugin config from `~/.hermes/mem0.json`:
+
+```json
+{
+  "api_key": "m0sk_xxx",
+  "host": "http://localhost:8888",
+  "user_id": "hermes-user",
+  "agent_id": "hermes"
+}
+```
+
+Or via environment variables:
+
+```bash
+export MEM0_API_KEY=m0sk_xxx
+export MEM0_HOST=http://localhost:8888
+export MEM0_USER_ID=hermes-user
+```
+
+When `host` is set, the Hermes plugin passes it through to `MemoryClient(api_key=..., host=...)`. Leave `host` empty to use the hosted platform.
+
+## Multi-Agent Memory Isolation
+
+When multiple agents share the same self-hosted server, isolation is controlled by the `user_id` namespace:
+
+| Scenario | Configuration |
+|----------|---------------|
+| **Each agent has its own memory** | Use different `user_id` per agent. OpenClaw defaults to the OS username; Hermes defaults to `hermes-user`. They are naturally isolated. |
+| **Agents share memory** | Set the same `user_id` for both. Hermes writes will be visible to OpenClaw searches, and vice versa. |
+
+The `agent_id` field provides additional attribution (set on write) but does not affect read scope by default — both agents searching the same `user_id` will see each other's memories.
+
+> The current server uses one API key namespace for all memories. If you need per-key access control (so that key A cannot see user B's memories), that is a future enhancement — for now, treat the API key as an admin credential.
+
+## Verification
+
+Quick smoke test to confirm everything works:
+
+```bash
+ADMIN_KEY=$(grep "^ADMIN_API_KEY=" server/.env | cut -d= -f2-)
+
+# Ping
+curl -H "Authorization: Token $ADMIN_KEY" http://localhost:8888/v1/ping/
+
+# Add
+curl -H "Authorization: Token $ADMIN_KEY" -H "Content-Type: application/json" \
+  -X POST http://localhost:8888/v3/memories/add/ \
+  -d '{"messages":[{"role":"user","content":"I prefer dark mode"}],"user_id":"test"}'
+
+# Search
+sleep 2
+curl -H "Authorization: Token $ADMIN_KEY" -H "Content-Type: application/json" \
+  -X POST http://localhost:8888/v3/memories/search/ \
+  -d '{"query":"theme preferences","filters":{"user_id":"test"}}'
+```
+
+All three calls should return HTTP 200 with the expected JSON shapes.
+
+## Troubleshooting
+
+### `ValueError: org_id and project_id must be set`
+
+You are using `mem0ai < 3.0` (which Hermes ships with). The self-hosted server's `/v1/ping/` returns synthetic `org_id`/`project_id` values to satisfy this older SDK — make sure your server is up to date with this patch.
+
+### `expected N dimensions, not M`
+
+The pgvector collection was created with a different embedding dimension than your current embedder model produces. Drop the table and let the server recreate it:
+
+```bash
+docker exec mem0-dev-postgres-1 psql -U postgres -d postgres \
+  -c "DROP TABLE IF EXISTS mem0_<DIM>d CASCADE;"
+docker compose restart mem0
+```
+
+Set `EMBEDDING_DIMS` in `server/.env` to match your embedder model's output dimension.
+
+### `401 Authentication required`
+
+Verify the API key. `Authorization: Token <key>`, `X-API-Key: <key>`, and `Authorization: Bearer <jwt>` all work. The key must either match `ADMIN_API_KEY` in `.env` or exist in the `api_keys` table (created via `POST /api-keys`).
+
+## mem0-plugin (Claude Code & OpenCode)
+
+The official [`@mem0/mem0-plugin`](https://www.npmjs.com/package/@mem0/mem0-plugin) (used by both Claude Code and OpenCode) hits two endpoints by default: `api.mem0.ai` for REST and `mcp.mem0.ai` for MCP. To point both at your self-hosted server set `MEM0_HOST` and route MCP through the bundled stdio bridge.
+
+### 1. Set `MEM0_HOST` everywhere the plugin runs
+
+Add to your shell profile so every hook and skill inherits it:
+
+```bash
+export MEM0_API_KEY="m0sk_..."          # from server/.env ADMIN_API_KEY
+export MEM0_HOST="http://localhost:8888"
+```
+
+All plugin Python scripts (`auto_capture.py`, `auto_import.py`, `_search.py`, `on_session_start.sh`, …) honour `MEM0_HOST` and fall back to `https://api.mem0.ai` when it isn't set. The OpenCode plugin entry (`opencode-mem0.ts`) also forwards it to `MemoryClient` and exports it back into the shell.env for child commands.
+
+### 2. Install the MCP bridge
+
+The plugin's MCP tools (`add_memory`, `search_memories`, `get_memories`, …) talk to a Streamable-HTTP MCP server. The self-hosted REST server doesn't speak MCP, so install the stdio bridge that ships in this repo:
+
+```bash
+cd server/mcp_bridge
+pip install -e .
+# installs the `mem0-mcp-bridge` CLI script
+```
+
+### 3. Register the bridge as the MCP server
+
+**Claude Code (global, all projects):**
+
+```bash
+claude mcp add --scope user --transport stdio mem0 \
+  --env MEM0_API_KEY=$MEM0_API_KEY \
+  --env MEM0_HOST=http://localhost:8888 \
+  -- mem0-mcp-bridge
+```
+
+**OpenCode (per project):** edit `~/.opencode/opencode.json` (or the project-level file):
+
+```json
+{
+  "mcp": {
+    "mem0": {
+      "type": "stdio",
+      "command": "mem0-mcp-bridge",
+      "env": {
+        "MEM0_API_KEY": "${MEM0_API_KEY}",
+        "MEM0_HOST": "http://localhost:8888"
+      }
+    }
+  }
+}
+```
+
+The bridge exposes 9 tools that mirror the hosted `mcp.mem0.ai` schema and forwards each one to the matching `/v3/memories/...` or `/v1/memories/...` REST route on your self-hosted server.
+
+### 4. Verify
+
+Restart your editor and check the SessionStart banner:
+
+```
+## Mem0 Active
+`user=<you> | project=<repo> | branch=<branch> | memories=<N>`
+```
+
+If `memories` shows a real count (not `?`), the REST side is wired up. To verify MCP, ask the agent `search my memories for ...` — it should call the bridge's `search_memories` tool and return hits from your local server.
+
+### Filter compatibility notes
+
+- The self-hosted server's OSS code path doesn't natively understand the hosted platform's `{"AND": [...]}` / `{"OR": [...]}` filter logic. The `/v3/memories/` and `/v3/memories/search/` SDK-compat endpoints flatten single-level `AND` clauses for you, but more complex filter trees fall back to "no results" rather than returning wrong results.
+- OSS `Memory.add` and `Memory.get_all` only know `user_id` / `agent_id` / `run_id` as first-class identifiers. `app_id` from the plugin is preserved as metadata at write time and silently dropped from filters at read time; isolation between projects relies on `user_id` (or a project-specific `agent_id`) in the self-hosted setup.
