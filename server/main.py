@@ -28,6 +28,11 @@ from routers import auth as auth_router
 from routers import entities as entities_router
 from routers import requests as requests_router
 from schemas import MessageResponse
+
+try:  # self-hosted adapter — optional, see self-mem0/README.md
+    from self_mem0.server import bootstrap as _self_mem0
+except ImportError:
+    _self_mem0 = None
 from server_state import (
     get_current_config,
     get_memory_instance,
@@ -139,6 +144,8 @@ DEFAULT_CONFIG = {
 
 
 set_session_factory(SessionLocal)
+if _self_mem0:
+    _self_mem0.patch_config(DEFAULT_CONFIG)
 initialize_state(DEFAULT_CONFIG)
 
 
@@ -169,6 +176,8 @@ app.include_router(auth_router.router)
 app.include_router(api_keys_router.router)
 app.include_router(entities_router.router)
 app.include_router(requests_router.router)
+if _self_mem0:
+    _self_mem0.attach_routes(app)
 
 
 class Message(BaseModel):

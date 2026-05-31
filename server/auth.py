@@ -159,6 +159,14 @@ async def verify_auth(
         _mark_auth_type(request, "api_key")
         return _resolve_user_from_api_key(x_api_key, db)
 
+    try:  # self-hosted adapter: Authorization: Token <key> (Mem0 SDK)
+        from self_mem0.server.auth_token_scheme import MISS, try_token_auth
+        _result = try_token_auth(request, db)
+        if _result is not MISS:
+            return _result
+    except ImportError:
+        pass
+
     if AUTH_DISABLED:
         _mark_auth_type(request, "disabled")
         return None

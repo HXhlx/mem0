@@ -191,3 +191,6 @@ qdrant_storage/
 testing.ipynb
 .weave/
 
+# Local deployment snapshot (contains credentials, IPs, ports — never commit)
+DEPLOYMENT.local.md
+*.local.md

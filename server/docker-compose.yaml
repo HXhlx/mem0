@@ -28,6 +28,8 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - AUTH_DISABLED=${AUTH_DISABLED:-false}
       - MEM0_TELEMETRY=${MEM0_TELEMETRY:-true}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
 
   postgres:
       image: pgvector/pgvector:pg17
@@ -38,8 +40,9 @@ services:
       environment:
         - POSTGRES_USER=${POSTGRES_USER:-postgres}
         - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+        - POSTGRES_DB=${POSTGRES_DB:-mem0_app}
       healthcheck:
-        test: ["CMD-SHELL", "pg_isready -q -d postgres -U ${POSTGRES_USER:-postgres}"]
+        test: ["CMD-SHELL", "pg_isready -q -d ${POSTGRES_DB:-mem0_app} -U ${POSTGRES_USER:-postgres}"]
         interval: 5s
         timeout: 5s
         retries: 5
