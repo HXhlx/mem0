@@ -13,7 +13,7 @@ A non-invasive layer that lets `mem0/server/` (FastAPI + pgvector) serve the
 
 ```
 self-mem0/
-├── apply.sh                    one-shot enable (docker override + bridge + plugin patch)
+├── apply.sh                    one-shot enable (docker override + mem0-mcp + plugin patch)
 ├── revert.sh                   undo the above
 ├── self_mem0/                  Python package — wired in by main.py / auth.py hooks
 │   └── server/
@@ -22,13 +22,18 @@ self-mem0/
 │       ├── sdk_compat.py       /v3/memories/* + /v1/memories/* routes for MemoryClient
 │       ├── ping_route.py       /v1/ping/ stub (satisfies older SDK Project validator)
 │       └── auth_token_scheme.py  Authorization: Token <key> parser
-├── mcp_bridge/                 stdio MCP server forwarding to /v3/memories/* REST
-│   └── mem0_mcp_bridge/        9 tools mirroring mcp.mem0.ai schema
 ├── plugins/
-│   └── patch_mem0_plugin.sh    inject MEM0_HOST into the user-level Claude Code plugin
+│   ├── patch_mem0_plugin.sh    inject MEM0_HOST into the user-level Claude Code plugin
+│   └── redirect_mcp.sh         point the plugin's MCP config at the local SSE server
 └── docs/
     └── self-hosted-agents.mdx  full integration guide
 ```
+
+The MCP server itself lives in the sibling `../mem0-mcp/` package — a
+self-hosted fork of the archived `mem0ai/mem0-mcp`. It uses
+`MemoryClient(host=$MEM0_HOST)` to talk to this REST surface, so the
+`sdk_compat` router above is what makes it work unchanged against the
+self-hosted server.
 
 ## What the hooks look like
 
@@ -87,8 +92,9 @@ curl -s "$MEM0_HOST/v1/ping/" -H "Authorization: Token $MEM0_API_KEY"
 | `auth_token_scheme.py` | Inline `Authorization: Token <key>` parsing inside `verify_auth` |
 | `ping_route.py` | The `@app.get("/v1/ping/")` handler |
 | `default_config_overrides.py` | The `_llm_config` / `_embedder_config` / `_pgvector_config` env reads |
-| `mcp_bridge/` | A new `server/mcp_bridge/` subpackage |
+| `../mem0-mcp/` (sibling) | The standalone mem0-mcp MCP server (replaces the former in-tree `mcp_bridge/`) |
 | `plugins/patch_mem0_plugin.sh` | Direct edits to `mem0-plugin/scripts/*.py` |
+| `plugins/redirect_mcp.sh` | Rewrite the plugin's `.mcp.json` to point at the local SSE server |
 
 ## Upgrade story
 
@@ -108,3 +114,11 @@ behaviour change in one directory that mem0 will never touch, and reduces the
 in-tree footprint to 12 lines that read like obvious hook points.
 
 See `docs/self-hosted-agents.mdx` for the full integration story.
+
+## Codex / Claude Code 插件本地配置
+
+要使用自托管的 Mem0 服务替代托管平台，请参考：
+
+- `SETUP_LOCAL.md` — 快速开始指南
+- `examples/codex-mcp.local.json` — Codex MCP 配置模板
+- `examples/claude-mcp.local.json` — Claude Code MCP 配置模板

@@ -1,4 +1,3 @@
-# Ephemeral install artifacts created by apply.sh — never commit.
-mcp_bridge/.venv/
+# Ephemeral install artifacts — never commit.
 **/__pycache__/
 *.pyc

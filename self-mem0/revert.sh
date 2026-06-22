@@ -9,10 +9,7 @@ REPO="$(cd "$ROOT/.." && pwd)"
 echo "=== 1. remove docker-compose.override.yaml ==="
 rm -f "$REPO/server/docker-compose.override.yaml"
 
-echo "=== 2. remove mcp_bridge venv ==="
-rm -rf "$ROOT/mcp_bridge/.venv"
-
-echo "=== 3. revert user-level mem0-plugin patches ==="
+echo "=== 2. revert user-level mem0-plugin patches ==="
 if [ -d "$HOME/.claude/plugins/cache/mem0-plugins/mem0" ]; then
   "$ROOT/plugins/patch_mem0_plugin.sh" --revert
   "$ROOT/plugins/redirect_mcp.sh" --revert

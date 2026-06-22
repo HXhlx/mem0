@@ -165,7 +165,7 @@ Verify the API key. `Authorization: Token <key>`, `X-API-Key: <key>`, and `Autho
 
 ## mem0-plugin (Claude Code & OpenCode)
 
-The official [`@mem0/mem0-plugin`](https://www.npmjs.com/package/@mem0/mem0-plugin) (used by both Claude Code and OpenCode) hits two endpoints by default: `api.mem0.ai` for REST and `mcp.mem0.ai` for MCP. To point both at your self-hosted server set `MEM0_HOST` and route MCP through the bundled stdio bridge.
+The official [`@mem0/mem0-plugin`](https://www.npmjs.com/package/@mem0/mem0-plugin) (used by both Claude Code and OpenCode) hits two endpoints by default: `api.mem0.ai` for REST and `mcp.mem0.ai` for MCP. To point both at your self-hosted server set `MEM0_HOST` and route MCP through the local `mem0-mcp` server.
 
 ### 1. Set `MEM0_HOST` everywhere the plugin runs
 
@@ -178,25 +178,34 @@ export MEM0_HOST="http://localhost:8888"
 
 All plugin Python scripts (`auto_capture.py`, `auto_import.py`, `_search.py`, `on_session_start.sh`, …) honour `MEM0_HOST` and fall back to `https://api.mem0.ai` when it isn't set. The OpenCode plugin entry (`opencode-mem0.ts`) also forwards it to `MemoryClient` and exports it back into the shell.env for child commands.
 
-### 2. Install the MCP bridge
+### 2. Start the mem0-mcp MCP server
 
-The plugin's MCP tools (`add_memory`, `search_memories`, `get_memories`, …) talk to a Streamable-HTTP MCP server. The self-hosted REST server doesn't speak MCP, so install the stdio bridge that ships in this repo:
+The plugin's MCP tools (`add_memory`, `search_memories`, `get_memories`, …) talk to an MCP server. The self-hosted REST server doesn't speak MCP, so run the `mem0-mcp` package (a self-hosted fork of the archived `mem0ai/mem0-mcp`, sibling to this directory). It uses `MemoryClient(host=$MEM0_HOST)` to forward every tool call to the matching `/v3/memories/...` or `/v1/memories/...` REST route on your self-hosted server.
+
+The easiest path is the docker-compose service wired by `apply.sh`:
 
 ```bash
-cd server/mcp_bridge
-pip install -e .
-# installs the `mem0-mcp-bridge` CLI script
+./self-mem0/apply.sh
+cd server && docker compose -f docker-compose.yaml -f docker-compose.override.yaml up -d --build
+# mem0-mcp listens on http://localhost:9003 — SSE at /sse, Streamable HTTP at /mcp
 ```
 
-### 3. Register the bridge as the MCP server
+Or run it directly from the `mem0-mcp/` package:
+
+```bash
+cd mem0-mcp
+MCP_TRANSPORT=combined MCP_PORT=9003 MEM0_HOST=http://localhost:8888 MEM0_API_KEY=$MEM0_API_KEY \
+  python -m mem0_mcp_server.http_entry
+```
+
+### 3. Register the MCP server
 
 **Claude Code (global, all projects):**
 
 ```bash
-claude mcp add --scope user --transport stdio mem0 \
-  --env MEM0_API_KEY=$MEM0_API_KEY \
-  --env MEM0_HOST=http://localhost:8888 \
-  -- mem0-mcp-bridge
+claude mcp add --scope user --transport sse mem0 \
+  --header "Authorization=Bearer $MEM0_API_KEY" \
+  http://localhost:9003/sse
 ```
 
 **OpenCode (per project):** edit `~/.opencode/opencode.json` (or the project-level file):
@@ -205,18 +214,17 @@ claude mcp add --scope user --transport stdio mem0 \
 {
   "mcp": {
     "mem0": {
-      "type": "stdio",
-      "command": "mem0-mcp-bridge",
-      "env": {
-        "MEM0_API_KEY": "${MEM0_API_KEY}",
-        "MEM0_HOST": "http://localhost:8888"
+      "type": "sse",
+      "url": "http://localhost:9003/sse",
+      "headers": {
+        "Authorization": "Bearer ${MEM0_API_KEY}"
       }
     }
   }
 }
 ```
 
-The bridge exposes 9 tools that mirror the hosted `mcp.mem0.ai` schema and forwards each one to the matching `/v3/memories/...` or `/v1/memories/...` REST route on your self-hosted server.
+The server exposes 9 tools that mirror the hosted `mcp.mem0.ai` schema (`add_memory`, `search_memories`, `get_memories`, `get_memory`, `update_memory`, `delete_memory`, `delete_all_memories`, `delete_entities`, `list_entities`).
 
 ### 4. Verify
 
@@ -227,7 +235,7 @@ Restart your editor and check the SessionStart banner:
 `user=<you> | project=<repo> | branch=<branch> | memories=<N>`
 ```
 
-If `memories` shows a real count (not `?`), the REST side is wired up. To verify MCP, ask the agent `search my memories for ...` — it should call the bridge's `search_memories` tool and return hits from your local server.
+If `memories` shows a real count (not `?`), the REST side is wired up. To verify MCP, ask the agent `search my memories for ...` — it should call the `search_memories` tool and return hits from your local server.
 
 ### Filter compatibility notes
 

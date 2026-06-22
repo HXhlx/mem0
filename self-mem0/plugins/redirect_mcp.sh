@@ -1,38 +1,30 @@
 #!/usr/bin/env bash
 # redirect_mcp.sh — point the mem0-plugin's bundled MCP config at the local
-# stdio bridge instead of https://mcp.mem0.ai/mcp/.
+# self-hosted mem0-mcp HTTP/SSE server instead of https://mcp.mem0.ai/mcp/.
 #
 # Background: the @mem0/mem0-plugins package ships TWO MCP config files
 #   - .mcp.json          (Claude Code's standard format)
 #   - mcp_config.json    (legacy format kept for backwards compat)
-# Both hardcode the hosted mcp.mem0.ai endpoint and there is no env-var
-# override. We rewrite both to a stdio entry pointing at the bridge that
-# self-mem0/apply.sh installed at self-mem0/mcp_bridge/.venv/bin/mem0-mcp-bridge.
+# Both hardcode the hosted mcp.mem0.ai endpoint. We rewrite both to an SSE
+# entry pointing at the mem0-mcp container exposed by docker-compose on
+# http://localhost:9003/sse (combined transport: SSE for Claude Code,
+# Streamable HTTP /mcp for Codex).
 #
 # Idempotent. Backs up to .self-mem0.bak on first run. Re-run after each
 # plugin upgrade (it auto-targets the highest installed version).
 #
 # Usage:
-#   self-mem0/plugins/redirect_mcp.sh             # rewrite to stdio bridge
+#   self-mem0/plugins/redirect_mcp.sh             # rewrite to local SSE
 #   self-mem0/plugins/redirect_mcp.sh /custom     # custom plugin version dir
 #   self-mem0/plugins/redirect_mcp.sh --revert    # restore upstream .mcp.json
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BRIDGE_BIN="${MEM0_MCP_BRIDGE_BIN:-$ROOT/mcp_bridge/.venv/bin/mem0-mcp-bridge}"
-MEM0_HOST_DEFAULT="${MEM0_HOST:-http://localhost:8888}"
-# MEM0_USER_ID baked into .mcp.json so it survives shell-less launches
-# (IDE, Desktop, etc.). Defaults to a hard-bucketed Claude Code namespace
-# under the ubuntu-* scheme so it never collides with other agents.
-MEM0_USER_ID_DEFAULT="${MEM0_USER_ID:-ubuntu-claudecode}"
-
-# Per Claude Code docs (code.claude.com/docs/en/mcp), .mcp.json supports
-# ${VAR} expansion in env/url/headers/command/args. We use the placeholder
-# so the real key stays in the user's shell profile (~/.bashrc) and isn't
-# baked into a plugin-managed JSON file. Required precondition:
-#     export MEM0_API_KEY="m0sk_..."  in ~/.bashrc (or equivalent)
-# Without it, Claude Code fails to parse this .mcp.json at startup.
+# The mem0-mcp container (built from ../mem0-mcp) listens on 9003 and serves
+# SSE at /sse + Streamable HTTP at /mcp. Override MEM0_MCP_URL for non-default
+# ports or remote hosts.
+MEM0_MCP_URL="${MEM0_MCP_URL:-http://localhost:9003/sse}"
 
 REVERT=false
 TARGET=""
@@ -76,17 +68,11 @@ if $REVERT; then
   exit 0
 fi
 
-[ -x "$BRIDGE_BIN" ] || {
-  echo "bridge binary not found / not executable: $BRIDGE_BIN" >&2
-  echo "run self-mem0/apply.sh first to install the bridge." >&2
-  exit 1
-}
-
 if [ -z "${MEM0_API_KEY:-}" ]; then
   echo "  WARNING: MEM0_API_KEY is not set in the current shell." >&2
   echo "  Add to your shell profile (~/.bashrc or ~/.zshrc):" >&2
   echo "    export MEM0_API_KEY=\"\$(grep ADMIN_API_KEY $(cd "$ROOT/.." && pwd)/server/.env | sed 's/.*=//' | tr -d '\"')\"" >&2
-  echo "  Claude Code requires it to expand \${MEM0_API_KEY} in .mcp.json at startup." >&2
+  echo "  Claude Code sends it as the Bearer token to the local MCP server." >&2
 fi
 
 backup_once() {
@@ -101,13 +87,10 @@ write_mcp_json() {
 {
   "mcpServers": {
     "mem0": {
-      "type": "stdio",
-      "command": "$BRIDGE_BIN",
-      "args": [],
-      "env": {
-        "MEM0_API_KEY": "\${MEM0_API_KEY}",
-        "MEM0_HOST": "$MEM0_HOST_DEFAULT",
-        "MEM0_USER_ID": "$MEM0_USER_ID_DEFAULT"
+      "type": "sse",
+      "url": "$MEM0_MCP_URL",
+      "headers": {
+        "Authorization": "Bearer \${MEM0_API_KEY}"
       }
     }
   }
@@ -121,4 +104,4 @@ write_mcp_json "$PLUGIN_DIR/mcp_config.json"
 
 echo ""
 echo "done. Restart Claude Code so it re-reads the MCP config."
-echo "verify with: claude mcp list  (expect: mem0 → $BRIDGE_BIN (stdio) ✓ Connected)"
+echo "verify with: claude mcp list  (expect: mem0 → $MEM0_MCP_URL (sse) ✓ Connected)"

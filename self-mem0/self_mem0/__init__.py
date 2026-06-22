@@ -7,7 +7,10 @@ Loaded by mem0 ``server/main.py`` and ``server/auth.py`` via opt-in
 * ``Authorization: Token <key>`` parsing for ``MemoryClient`` SDK
 * ``/v1/ping/`` health stub satisfying old SDK ``Project._validate_org_project``
 * Env-driven ``DEFAULT_CONFIG`` overrides (custom LLM/embedder base URL, dims)
-* Stdio MCP bridge (separate package under ``mcp_bridge/``)
+
+The MCP server itself lives in the sibling ``mem0-mcp/`` package (a
+self-hosted fork of the archived mem0ai/mem0-mcp) and talks to this REST
+surface via ``MemoryClient(host=MEM0_HOST)``.
 
 Designed to be optional: when ``self_mem0`` isn't on ``sys.path``, the server
 runs exactly as upstream ships it.
