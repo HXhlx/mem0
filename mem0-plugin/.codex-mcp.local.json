@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mem0": {
+      "url": "http://localhost:9003/sse",
+      "bearer_token_env_var": "MEM0_API_KEY"
+    }
+  }
+}

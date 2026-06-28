@@ -1,0 +1,15 @@
+# Codex config.toml — self-hosted Mem0
+# Copy to ~/.codex/config.toml
+
+# ── MCP servers ──────────────────────────────────────
+[mcp_servers.mem0]
+url = "http://localhost:9003/sse"
+bearer_token_env_var = "MEM0_API_KEY"
+
+# ── Feature flags ────────────────────────────────────
+[features]
+codex_hooks = true
+
+# ── Required env vars (set in shell profile) ─────────
+# export MEM0_API_KEY="<your-admin-api-key>"
+# export MEM0_HOST="http://localhost:8888"
