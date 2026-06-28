@@ -2,3 +2,6 @@
 	path = evaluation
 	url = https://github.com/mem0ai/memory-benchmarks
 	branch = main
+[submodule "mem0-mcp"]
+	path = mem0-mcp
+	url = https://github.com/HXhlx/mem0-mcp.git
