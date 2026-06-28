@@ -1,0 +1,12 @@
+{
+  "profile": "E",
+  "name": "LLM升级: qwen3.6-flash + text-emb-v4(1536) + qwen3-vl-rerank",
+  "ts": "2026-06-02T19:08:58.203224",
+  "add_ok": 10,
+  "add_avg_ms": 9618,
+  "total_memories": 10,
+  "search_avg_ms": 496,
+  "recall": "1/10",
+  "recall_pct": 10.0,
+  "mrr": 0.1
+}

@@ -206,7 +206,13 @@ def _matches_post_filters(payload: Dict[str, Any], post_filters: Dict[str, Any])
         return True
     md = payload.get("metadata") or {}
     for k, v in post_filters.items():
-        if md.get(k) != v:
+        # Allow records without metadata.app_id to pass through when post_filter
+        # requires app_id — this preserves backward compatibility for memories
+        # created before app_id was introduced.
+        actual = md.get(k)
+        if actual is None and v is not None:
+            continue
+        if actual != v:
             return False
     return True
 
@@ -316,17 +322,24 @@ def _list_memories_impl(body: _SdkListRequest, _auth=Depends(verify_auth)):
     branches, post_filters = _flatten_platform_filters(body.filters or {})
     server_filters_active = any(branches) and any(b for b in branches)
     try:
+        # When post_filters are present, we must fetch the full bucket first
+        # and then apply client-side metadata filtering. Using page_size as
+        # top_k would truncate the upstream result before post-filters have a
+        # chance to select matching rows (e.g. top_k=5 might return 5 rows
+        # all with app_id=Ext, leaving 0 rows after app_id=mem0ai-mem0 filter).
+        fetch_top_k = _DEFAULT_LIST_TOP_K if post_filters else (
+            body.page_size if body.page_size and body.page_size > 0 else _DEFAULT_LIST_TOP_K
+        )
+        page_size = body.page_size if body.page_size and body.page_size > 0 else None
+
         if server_filters_active or post_filters:
             mem = get_memory_instance()
-            # Memory.get_all defaults top_k=20 which silently truncates large
-            # buckets — pass _DEFAULT_LIST_TOP_K so every row visible.
-            list_top_k = body.page_size if body.page_size and body.page_size > 0 else _DEFAULT_LIST_TOP_K
 
             def runner(server_filters):
                 if server_filters:
-                    return mem.get_all(filters=server_filters, top_k=list_top_k)
+                    return mem.get_all(filters=server_filters, top_k=fetch_top_k)
                 # branch with empty server filters → full scan via vector_store
-                raw = mem.vector_store.list(top_k=list_top_k)
+                raw = mem.vector_store.list(top_k=fetch_top_k)
                 rows = raw[0] if raw and isinstance(raw, list) and isinstance(raw[0], list) else raw or []
                 return {"results": [_serialize_memory(row) for row in rows]}
 
@@ -336,7 +349,12 @@ def _list_memories_impl(body: _SdkListRequest, _auth=Depends(verify_auth)):
             raw = get_memory_instance().vector_store.list(top_k=top_k)
             rows = raw[0] if raw and isinstance(raw, list) and isinstance(raw[0], list) else raw or []
             results = [_serialize_memory(row) for row in rows]
-        return {"results": results, "count": len(results)}
+        # Always return total count (pre-pagination) so callers like the
+        # session-start hook can read the bucket size even when page_size=1.
+        total_count = len(results)
+        if page_size is not None:
+            results = results[:page_size]
+        return {"results": results, "count": total_count}
     except Exception:
         raise upstream_error()
 
@@ -386,9 +404,13 @@ def v2_list_memories(body: _SdkListRequest, _auth=Depends(verify_auth)):
 def _search_impl(search_req: _SdkSearchRequest, _auth=Depends(verify_auth)):
     try:
         branches, post_filters = _flatten_platform_filters(search_req.filters or {})
-        params: Dict[str, Any] = {}
-        if search_req.top_k is not None:
-            params["top_k"] = search_req.top_k
+        requested_top_k = search_req.top_k or 10
+        # When post_filters are present, inflate top_k so post-filtering still
+        # yields enough results. A 5× multiplier is a reasonable heuristic;
+        # Memory.search is fast (vector similarity), and the post-filter
+        # reduces the set afterward.
+        effective_top_k = requested_top_k * 5 if post_filters else requested_top_k
+        params: Dict[str, Any] = {"top_k": effective_top_k}
         if search_req.threshold is not None:
             params["threshold"] = search_req.threshold
         if search_req.rerank is not None:
@@ -397,6 +419,14 @@ def _search_impl(search_req: _SdkSearchRequest, _auth=Depends(verify_auth)):
         mem = get_memory_instance()
 
         def runner(server_filters):
+            # Memory.search requires at least one of user_id/agent_id/run_id
+            # in filters. If post_filters consumed all keys (e.g. only app_id),
+            # server_filters may be empty — fall back to a full-scan list +
+            # post-filter instead of raising ValueError.
+            if not server_filters:
+                raw_rows = mem.vector_store.list(top_k=effective_top_k)
+                rows = raw_rows[0] if raw_rows and isinstance(raw_rows, list) and isinstance(raw_rows[0], list) else raw_rows or []
+                return {"results": [_serialize_memory(row) for row in rows]}
             return _call_upstream_with_retry(
                 "Memory.search",
                 mem.search,
@@ -405,14 +435,18 @@ def _search_impl(search_req: _SdkSearchRequest, _auth=Depends(verify_auth)):
                 **params,
             )
 
-        # Single branch with no post-filters → preserve native shape so callers
-        # that read .get("results") or assume the mem0 search response shape
-        # see no behavioural change.
-        if len(branches) == 1 and not post_filters:
-            return runner(branches[0])
+        # Single branch with no post-filters and non-empty server_filters
+        # → preserve native shape so callers that assume the mem0 search
+        # response shape see no behavioural change.
+        if len(branches) == 1 and not post_filters and branches[0]:
+            result = runner(branches[0])
+            # Truncate to requested top_k if we inflated it
+            if isinstance(result, dict) and "results" in result:
+                result["results"] = result["results"][:requested_top_k]
+            return result
 
         results = _run_branches(branches, post_filters, runner)
-        return {"results": results}
+        return {"results": results[:requested_top_k]}
     except Exception:
         raise upstream_error()
 

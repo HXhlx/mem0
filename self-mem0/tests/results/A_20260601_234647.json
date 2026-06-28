@@ -1,0 +1,12 @@
+{
+  "profile": "A",
+  "name": "基线: deepseek-v4-flash + text-emb-v4(1536) + qwen3-rerank",
+  "ts": "2026-06-01T23:46:47.944077",
+  "add_ok": 10,
+  "add_avg_ms": 15960,
+  "total_memories": 59,
+  "search_avg_ms": 646,
+  "recall": "9/10",
+  "recall_pct": 90.0,
+  "mrr": 0.533
+}

@@ -7,9 +7,13 @@ read additional env vars that upstream main.py ignores:
 ==========================  ===============================================
 Env var                     Effect
 ==========================  ===============================================
-``OPENAI_BASE_URL``         Routes LLM calls through a custom OpenAI-
-                            compatible endpoint (e.g. DashScope, vLLM).
-``EMBEDDER_API_KEY``        Separates the embedder key from the LLM key.
+``LLM_BASE_URL``            Routes LLM calls through a custom endpoint
+                            (e.g. sensenova), independent of EMBEDDER_BASE_URL.
+``LLM_API_KEY``             API key for LLM calls, independent of embedder.
+``OPENAI_BASE_URL``         Routes embedder/reranker through a custom
+                            OpenAI-compatible endpoint (e.g. LiteLLM).
+``OPENAI_API_KEY``          Fallback key for embedder/reranker.
+``EMBEDDER_API_KEY``        Separate embedder key (overrides OPENAI_API_KEY).
 ``EMBEDDER_BASE_URL``       Separate base URL for the embedder.
 ``EMBEDDING_DIMS``          Forces the pgvector column width to match the
                             embedder's actual output (1536 for DashScope
@@ -43,13 +47,18 @@ def patch(default_config: Dict[str, Any]) -> Dict[str, Any]:
     ``main.DEFAULT_CONFIG = patch(main.DEFAULT_CONFIG)``.
     """
     openai_base_url = os.environ.get("OPENAI_BASE_URL")
+    llm_base_url = os.environ.get("LLM_BASE_URL") or openai_base_url
     embedder_api_key = os.environ.get("EMBEDDER_API_KEY") or os.environ.get("OPENAI_API_KEY")
     embedder_base_url = os.environ.get("EMBEDDER_BASE_URL") or openai_base_url
     embedding_dims = os.environ.get("EMBEDDING_DIMS")
 
     llm_cfg = default_config.get("llm", {}).get("config", {})
-    if openai_base_url:
-        llm_cfg["openai_base_url"] = openai_base_url
+    if llm_base_url:
+        llm_cfg["openai_base_url"] = llm_base_url
+
+    llm_api_key = os.environ.get("LLM_API_KEY")
+    if llm_api_key:
+        llm_cfg["api_key"] = llm_api_key
 
     embedder_cfg = default_config.get("embedder", {}).get("config", {})
     if embedder_api_key:
@@ -76,6 +85,18 @@ def patch(default_config: Dict[str, Any]) -> Dict[str, Any]:
             reranker_cfg["api_key"] = api_key
         if (url := os.environ.get("RERANKER_URL")):
             reranker_cfg["url"] = url
+
+        # llm_reranker: needs nested llm config to use OPENAI_BASE_URL from LiteLLM
+        if reranker_provider == "llm_reranker":
+            openai_base_url = os.environ.get("OPENAI_BASE_URL") or os.environ.get("EMBEDDER_BASE_URL")
+            reranker_cfg["llm"] = {
+                "provider": "openai",
+                "config": {
+                    "model": os.environ.get("RERANKER_MODEL") or "gpt-4o-mini",
+                    "openai_base_url": openai_base_url,
+                }
+            }
+
         default_config["reranker"] = {
             "provider": reranker_provider,
             "config": reranker_cfg,

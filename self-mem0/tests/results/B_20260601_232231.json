@@ -1,0 +1,249 @@
+{
+  "profile": "B",
+  "name": "LLM升级: qwen3.6-flash + text-embedding-v4 + qwen3-rerank",
+  "ts": "2026-06-01T23:22:31.845748",
+  "add_ok": 10,
+  "add_avg_ms": 10069,
+  "total_memories": 12,
+  "search_avg_ms": 526,
+  "recall": "2/8",
+  "recall_pct": 25.0,
+  "mrr": 0.188,
+  "add_details": [
+    {
+      "idx": 0,
+      "ms": 15078,
+      "ok": true,
+      "memories": 10,
+      "error": ""
+    },
+    {
+      "idx": 1,
+      "ms": 7325,
+      "ok": true,
+      "memories": 0,
+      "error": ""
+    },
+    {
+      "idx": 2,
+      "ms": 4727,
+      "ok": true,
+      "memories": 0,
+      "error": ""
+    },
+    {
+      "idx": 3,
+      "ms": 5483,
+      "ok": true,
+      "memories": 0,
+      "error": ""
+    },
+    {
+      "idx": 4,
+      "ms": 18087,
+      "ok": true,
+      "memories": 1,
+      "error": ""
+    },
+    {
+      "idx": 5,
+      "ms": 13450,
+      "ok": true,
+      "memories": 1,
+      "error": ""
+    },
+    {
+      "idx": 6,
+      "ms": 11872,
+      "ok": true,
+      "memories": 0,
+      "error": ""
+    },
+    {
+      "idx": 7,
+      "ms": 9796,
+      "ok": true,
+      "memories": 0,
+      "error": ""
+    },
+    {
+      "idx": 8,
+      "ms": 4414,
+      "ok": true,
+      "memories": 0,
+      "error": ""
+    },
+    {
+      "idx": 9,
+      "ms": 10459,
+      "ok": true,
+      "memories": 0,
+      "error": ""
+    }
+  ],
+  "search_details": [
+    {
+      "query": "我用的什么后端框架？",
+      "ms": 1135,
+      "total_hits": 12,
+      "hit_idxs": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        5,
+        4,
+        0,
+        0,
+        0
+      ],
+      "relevant": [
+        0
+      ],
+      "recalled": 1,
+      "recall_pct": 100.0,
+      "mrr": 1.0
+    },
+    {
+      "query": "向量数据库维度怎么处理？",
+      "ms": 629,
+      "total_hits": 12,
+      "hit_idxs": [
+        0,
+        0,
+        0,
+        4,
+        5,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "relevant": [
+        1
+      ],
+      "recalled": 0,
+      "recall_pct": 0.0,
+      "mrr": 0.0
+    },
+    {
+      "query": "前端包管理工具偏好",
+      "ms": 526,
+      "total_hits": 12,
+      "hit_idxs": [
+        0,
+        5,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        4
+      ],
+      "relevant": [
+        2
+      ],
+      "recalled": 0,
+      "recall_pct": 0.0,
+      "mrr": 0.0
+    },
+    {
+      "query": "AI记忆是怎么隔离的？",
+      "ms": 532,
+      "total_hits": 12,
+      "hit_idxs": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        4,
+        0,
+        5,
+        0,
+        0,
+        0
+      ],
+      "relevant": [
+        3
+      ],
+      "recalled": 0,
+      "recall_pct": 0.0,
+      "mrr": 0.0
+    },
+    {
+      "query": "代码规范和风格",
+      "ms": 501,
+      "total_hits": 12,
+      "hit_idxs": [
+        0,
+        5,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        4,
+        0
+      ],
+      "relevant": [
+        5
+      ],
+      "recalled": 1,
+      "recall_pct": 100.0,
+      "mrr": 0.5
+    },
+    {
+      "query": "重排序模型",
+      "ms": 213,
+      "total_hits": 0,
+      "hit_idxs": [],
+      "relevant": [
+        6
+      ],
+      "recalled": 0,
+      "recall_pct": 0.0,
+      "mrr": 0.0
+    },
+    {
+      "query": "开发环境硬件配置",
+      "ms": 214,
+      "total_hits": 0,
+      "hit_idxs": [],
+      "relevant": [
+        4
+      ],
+      "recalled": 0,
+      "recall_pct": 0.0,
+      "mrr": 0.0
+    },
+    {
+      "query": "code review 流程",
+      "ms": 461,
+      "total_hits": 1,
+      "hit_idxs": [
+        0
+      ],
+      "relevant": [
+        7
+      ],
+      "recalled": 0,
+      "recall_pct": 0.0,
+      "mrr": 0.0
+    }
+  ]
+}

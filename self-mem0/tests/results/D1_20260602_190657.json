@@ -1,0 +1,12 @@
+{
+  "profile": "D1",
+  "name": "Vision+: deepseek-v4-flash + tongyi-emb-vision(1536) + qwen3-vl-rerank",
+  "ts": "2026-06-02T19:06:57.437296",
+  "add_ok": 0,
+  "add_avg_ms": 6251,
+  "total_memories": 0,
+  "search_avg_ms": 6222,
+  "recall": "0/10",
+  "recall_pct": 0.0,
+  "mrr": 0.0
+}
