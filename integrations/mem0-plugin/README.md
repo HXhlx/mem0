@@ -69,38 +69,48 @@ This installs the full plugin including the MCP server, lifecycle hooks (automat
 
 ### Codex
 
+Codex support defaults to the self-hosted setup in this repository:
+
+```bash
+export MEM0_HOST="http://localhost:8888"      # Mem0 REST API
+export MEM0_API_KEY="your-admin-or-user-key" # matches your self-hosted server
+```
+
+Run the local MCP bridge (`mem0-mcp`) on `localhost:9003` with Streamable HTTP enabled. In the bundled Docker Compose setup this is the `mem0-mcp` service, and Codex connects to `http://localhost:9003/mcp`.
+
 **Option A — Direct MCP** (fastest, MCP only):
 
 Codex reads MCP servers from `~/.codex/config.toml` as TOML. Add:
 
 ```toml
 [mcp_servers.mem0]
-url = "https://mcp.mem0.ai/mcp"
+url = "http://localhost:9003/mcp"
 bearer_token_env_var = "MEM0_API_KEY"
 ```
 
 Export `MEM0_API_KEY` in your shell and restart Codex. `codex mcp add` only supports stdio servers, so HTTP servers like Mem0's must be added via `config.toml` directly (or via the **Plugins → Connect to a custom MCP → Streamable HTTP** UI in the Codex app).
 
+> **Don't combine Direct MCP with the full plugin.** The plugin manifest auto-registers `mem0` as an MCP server via `integrations/mem0-plugin/.codex-mcp.json`; adding a manual `[mcp_servers.mem0]` block would duplicate the registration.
+
 **Option B — Sideload the plugin** (full experience: MCP + skills + opt-in hooks):
 
-Clone the repo and register the bundled marketplace with one CLI call:
+Register this repository as a local marketplace:
 
 ```bash
-git clone https://github.com/mem0ai/mem0.git ~/codex-plugins/mem0-source
-codex plugin marketplace add ~/codex-plugins/mem0-source
+codex plugin marketplace add /home/hx/AI/Ext/mem0
 ```
 
 This points Codex at the repo's `.agents/plugins/marketplace.json`, which references `integrations/mem0-plugin/` as the local source. Restart Codex, run `/plugins`, and install **Mem0** from the **Mem0 Plugins** marketplace.
 
-> **Don't combine with Option A.** The plugin manifest auto-registers `mem0` as an MCP server via `integrations/mem0-plugin/.codex-mcp.json` — adding a manual `[mcp_servers.mem0]` block would duplicate the registration.
+The bundled Codex MCP template (`.codex-mcp.json`) defaults to `http://localhost:9003/mcp`. To switch this plugin back to the hosted platform, copy `.codex-mcp.hosted.json` over `.codex-mcp.json` or run the hook installer with `--hosted`.
 
 **Optional — enable lifecycle hooks.** Codex doesn't auto-wire hooks from plugin manifests; it only reads `~/.codex/hooks.json` (or `<repo>/.codex/hooks.json`) ([docs](https://developers.openai.com/codex/hooks)). Run the bundled installer once to merge Mem0's entries:
 
 ```bash
-python3 ~/codex-plugins/mem0-source/integrations/mem0-plugin/scripts/install_codex_hooks.py
+python3 /home/hx/AI/Ext/mem0/integrations/mem0-plugin/scripts/install_codex_hooks.py
 ```
 
-This merges three entries into `~/.codex/hooks.json` with absolute paths pointing into your clone:
+When `MEM0_HOST` is set, the installer uses self-hosted mode by default: hook script URLs point at `$MEM0_HOST`, and `.codex-mcp.local.json` is copied to `.codex-mcp.json`. This merges Mem0 entries into `~/.codex/hooks.json` with absolute paths pointing into your clone:
 
 | Event | What it does |
 |-------|--------------|
@@ -110,11 +120,13 @@ This merges three entries into `~/.codex/hooks.json` with absolute paths pointin
 
 Re-running the installer is idempotent (replaces the Mem0 entries rather than duplicating) and preserves any other hooks you have. To remove: `python3 .../install_codex_hooks.py --uninstall`. If you move or delete the clone directory, re-run the installer from the new location — the hooks file stores absolute paths.
 
-Codex hooks also require the `codex_hooks` feature flag in `~/.codex/config.toml`:
+**Switching modes:** Run `python3 .../install_codex_hooks.py --hosted` to use `https://api.mem0.ai` and copy `.codex-mcp.hosted.json` into place. Run `python3 .../install_codex_hooks.py --self-hosted --host http://localhost:8888` to force a self-hosted URL.
+
+Codex hooks also require the `hooks` feature flag in `~/.codex/config.toml` (older builds used `codex_hooks`, which now emits a deprecation warning):
 
 ```toml
 [features]
-codex_hooks = true
+hooks = true
 ```
 
 The installer prints a reminder if the flag isn't set. Restart Codex after editing the config.
