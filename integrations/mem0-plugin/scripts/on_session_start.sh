@@ -57,6 +57,7 @@ MEM0_API_KEY is not set. To configure:
 - **Desktop app**: Click the environment dropdown next to the prompt box → hover over **Local** → click the **gear icon** → add \`MEM0_API_KEY=m0-...\`
 - **CLI**: Add \`export MEM0_API_KEY=m0-...\` to your shell profile (~/.zshrc or ~/.bashrc)
 - Get a key at https://app.mem0.ai/dashboard/api-keys
+$(if [ -n "${MEM0_HOST:-}" ]; then printf '%s\n' "- Self-hosted API: ${MEM0_HOST}"; fi)
 
 Then invoke the \`mem0:onboard\` skill to complete setup.
 BANNER
@@ -74,6 +75,7 @@ if command -v python3 >/dev/null 2>&1; then
   MEM0_COUNT=$(python3 -c "
 import json, os, urllib.request, urllib.error
 api_key = os.environ.get('MEM0_API_KEY', '')
+api_url = (os.environ.get('MEM0_HOST') or 'https://api.mem0.ai').rstrip('/')
 user_id = os.environ.get('MEM0_RESOLVED_USER_ID', 'default')
 app_id = os.environ.get('MEM0_PROJECT_ID', '')
 global_search = os.environ.get('MEM0_GLOBAL_SEARCH', 'false') == 'true'
@@ -81,7 +83,7 @@ global_search = os.environ.get('MEM0_GLOBAL_SEARCH', 'false') == 'true'
 def get_count(filters):
     body = json.dumps({'filters': filters}).encode()
     req = urllib.request.Request(
-        'https://api.mem0.ai/v3/memories/?page=1&page_size=1',
+        f'{api_url}/v3/memories/?page=1&page_size=1',
         headers={'Authorization': f'Token {api_key}', 'Content-Type': 'application/json'},
         data=body, method='POST',
     )

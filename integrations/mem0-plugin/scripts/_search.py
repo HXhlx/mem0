@@ -7,9 +7,11 @@ All pre-fetch hooks use this instead of duplicating urllib boilerplate.
 from __future__ import annotations
 
 import json
+import os
 import urllib.request
 
-SEARCH_URL = "https://api.mem0.ai/v3/memories/search/"
+API_URL = (os.environ.get("MEM0_HOST") or "https://api.mem0.ai").rstrip("/")
+SEARCH_URL = f"{API_URL}/v3/memories/search/"
 SEARCH_TIMEOUT = 5
 
 
