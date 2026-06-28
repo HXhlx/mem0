@@ -82,6 +82,63 @@ fresh on each memory operation, so a change applies immediately — no restart.
 `delete_all_memories` always requires an explicit `scope="global"` to delete
 user-wide, so changing the default can't trigger a cross-project wipe.
 
+## Identity (`user_id`, `app_id`, `agent_id`)
+
+The `user_id` used for every memory operation resolves in this order
+(high → low). The first non-empty value wins:
+
+1. Tool-call arg (`user_id` parameter on the tool itself)
+2. Plugin options in `opencode.json`
+3. `~/.mem0/settings.json` → `identity.by_app[<app_id>]`
+4. `~/.mem0/settings.json` → `identity.by_editor.opencode`
+5. `~/.mem0/settings.json` → `identity.default.user_id`
+6. `MEM0_USER_ID` environment variable
+7. OS username
+
+Pick whichever layer fits the scope:
+
+```json
+// ~/.config/opencode/opencode.json — single per-machine override for opencode
+"plugin": [
+  ["@mem0/opencode-plugin", {
+    "user_id": "ubuntu-opencode",
+    "agent_id": "opencode"
+  }]
+]
+```
+
+```jsonc
+// ~/.mem0/settings.json — shared across mem0 plugins, opencode-specific layer
+{
+  "identity": {
+    "default": { "user_id": "ubuntu-opencode", "agent_id": "opencode" },
+    "by_editor": { "opencode": { "user_id": "ubuntu-opencode", "agent_id": "opencode" } },
+    "by_app": { "owner-repo": "ubuntu-opencode-repo" }
+  }
+}
+```
+
+Interactive control via the `/mem0-user` skill:
+
+```
+/mem0-user                              # show active id and source
+/mem0-user set ubuntu-opencode          # write identity.by_editor.opencode
+/mem0-user by-app owner-repo alice      # write identity.by_app["owner-repo"]
+/mem0-user clear                        # remove the opencode-specific entry
+```
+
+`app_id` follows the same chain (skipping `by_editor`, since project ids are
+editor-agnostic). `agent_id` is optional — when set, it becomes the default
+`agent_id` for every memory tool call that does not pass one explicitly.
+Resolution: plugin options → `identity.by_editor.opencode.agent_id` →
+`identity.default.agent_id` → `MEM0_AGENT_ID`. The active source for each
+identity is exported to shell as `$MEM0_USER_ID_SOURCE`,
+`$MEM0_APP_ID_SOURCE`, and (when set) `$MEM0_AGENT_ID_SOURCE`.
+
+`user_id` / `app_id` / `agent_id` are captured ONCE at plugin startup —
+changes via `/mem0-user` or `~/.mem0/settings.json` apply on the next
+OpenCode restart.
+
 ## Verify
 
 Start OpenCode and ask: *"Search my memories for recent decisions"*

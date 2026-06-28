@@ -25,9 +25,9 @@ import {
 } from "./dream";
 import {asScope, scopeSearchFilters, scopeWriteParams, resolveDefaultScope, SCOPE_GUIDANCE, type Scope} from "./scope";
 import {parseProjectFromRemote} from "./project";
+import {resolveUserId, resolveAppId, resolveAgentId, type PluginOptions} from "./identity";
 
-async function getUserId(): Promise<string> {
-  if (process.env.MEM0_USER_ID) return process.env.MEM0_USER_ID;
+async function getOsUserFallback(): Promise<string> {
   try {
     return userInfo().username;
   } catch {
@@ -35,18 +35,13 @@ async function getUserId(): Promise<string> {
   return process.env.USER || process.env.USERNAME || "unknown";
 }
 
-async function getProjectId($: any): Promise<string> {
-  if (process.env.MEM0_APP_ID) return process.env.MEM0_APP_ID;
-  // Prefer the git remote's owner/repo — stable across clones, worktrees, and
-  // sub-directories (handles https + ssh, incl. custom host aliases).
+async function getProjectFallback($: any): Promise<string> {
   try {
     const r = await $`git remote get-url origin`.quiet();
     const project = parseProjectFromRemote(r.stdout.toString());
     if (project) return project;
   } catch {
   }
-  // No usable remote: use the git repo ROOT dir name, not cwd (which may be a
-  // sub-directory, or your home dir if OpenCode was launched outside a repo).
   try {
     const r = await $`git rev-parse --show-toplevel`.quiet();
     const top = r.stdout.toString().trim();
@@ -255,7 +250,7 @@ function extractUserText(input: any, output: any): string {
   return "";
 }
 
-const Mem0Plugin: Plugin = async (ctx) => {
+const Mem0Plugin: Plugin = async (ctx, options?: PluginOptions) => {
   const {$, client} = ctx;
 
   const apiKey = process.env.MEM0_API_KEY;
@@ -275,9 +270,16 @@ const Mem0Plugin: Plugin = async (ctx) => {
     return {};
   }
 
-  const mem0 = new MemoryClient({apiKey});
-  const userId = await getUserId();
-  const appId = await getProjectId($);
+  const host = process.env.MEM0_HOST || process.env.MEM0_API_BASE;
+  const mem0 = new MemoryClient(host ? {apiKey, host} : {apiKey});
+
+  const settings = loadSettings();
+  const appIdResolved = resolveAppId(options, settings, process.env, await getProjectFallback($));
+  const appId = appIdResolved.value;
+  const userIdResolved = resolveUserId(options, settings, process.env, appId, await getOsUserFallback());
+  const userId = userIdResolved.value;
+  const agentIdResolved = resolveAgentId(options, settings, process.env);
+  const defaultAgentId = agentIdResolved?.value;
   const branch = await getBranch($);
   const stats = {adds: 0, searches: 0, messages: 0};
   const sessionId = generateSessionId();
@@ -353,6 +355,7 @@ Use the mem0 memory tools (add_memory, search_memories, get_memories, get_memory
 Identity context (resolved at plugin startup):
 - user_id: ${userId}
 - app_id: ${appId}
+- agent_id: ${defaultAgentId ?? "(unset)"}
 - session_id: ${sessionId}
 - branch: ${branch}`,
         description: desc,
@@ -373,6 +376,11 @@ Identity context (resolved at plugin startup):
       : scopeSearchFilters(ds, userId, appId, sessionId);
   }
 
+  function withDefaultAgentId<T extends {agent_id?: string}>(args: T): T {
+    if (!defaultAgentId || args.agent_id) return args;
+    return { ...args, agent_id: defaultAgentId };
+  }
+
   return {
     "chat.message": chatMessageHook,
     "experimental.chat.messages.transform": chatMessagesTransformHook,
@@ -390,6 +398,10 @@ Identity context (resolved at plugin startup):
         output.env.MEM0_SESSION_ID = sessionId;
         output.env.MEM0_BRANCH = branch;
         output.env.MEM0_GLOBAL_SEARCH = globalSearch ? "true" : "false";
+        output.env.MEM0_USER_ID_SOURCE = userIdResolved.source;
+        output.env.MEM0_APP_ID_SOURCE = appIdResolved.source;
+        if (defaultAgentId) output.env.MEM0_AGENT_ID = defaultAgentId;
+        if (agentIdResolved) output.env.MEM0_AGENT_ID_SOURCE = agentIdResolved.source;
       }
     },
 
@@ -426,15 +438,16 @@ Identity context (resolved at plugin startup):
           scope: tool.schema.string().optional().describe('Write scope: "project" (this repo, default), "session" (this run), or "global" (user-wide, all projects). Use "global" only when explicitly asked.')
         },
         async execute(args) {
+          const resolvedArgs = withDefaultAgentId(args);
           stats.adds++;
           if (dreamTriggered) dreamWriteSeen = true;
           captureEvent("tool_use", {tool: "add_memory"}, apiKey, appId);
-          const effScope: Scope = args.scope ? asScope(args.scope) : loadDefaultScope();
+          const effScope: Scope = resolvedArgs.scope ? asScope(resolvedArgs.scope) : loadDefaultScope();
           const sp = scopeWriteParams(effScope, userId, appId, sessionId);
-          const finalUserId = args.agent_id ? args.user_id : (args.user_id ?? sp.user_id);
-          const finalAppId = args.app_id ?? sp.app_id;
+          const finalUserId = resolvedArgs.agent_id ? resolvedArgs.user_id : (resolvedArgs.user_id ?? sp.user_id);
+          const finalAppId = resolvedArgs.app_id ?? sp.app_id;
 
-          const meta = args.metadata ?? {};
+          const meta = resolvedArgs.metadata ?? {};
           if (meta.confidence === undefined) meta.confidence = 0.7;
           if (!meta.source) meta.source = "opencode";
           if (!meta.type) meta.type = "task_learning";
@@ -442,18 +455,18 @@ Identity context (resolved at plugin startup):
           if (!meta.files) meta.files = ["*"];
           if (!meta.branch) meta.branch = branch;
 
-          let infer = args.infer;
+          let infer = resolvedArgs.infer;
           if (meta.confidence >= 1.0 && infer === undefined) {
             infer = false;
           }
 
           const res = await mem0.add(
-            [{ role: "user", content: args.text }],
+            [{ role: "user", content: resolvedArgs.text }],
             {
               user_id: finalUserId,
               app_id: finalAppId,
               run_id: sp.run_id,
-              agent_id: args.agent_id,
+              agent_id: resolvedArgs.agent_id,
               metadata: meta,
               infer
             } as any
@@ -475,12 +488,13 @@ Identity context (resolved at plugin startup):
           scope: tool.schema.string().optional().describe('Search scope: "project" (this repo, default), "session" (this run only), or "global" (across ALL your projects). Only use "global" when the user explicitly asks to search across projects.'),
         },
         async execute(args) {
+          const resolvedArgs = withDefaultAgentId(args);
           stats.searches++;
           captureEvent("tool_use", {tool: "search_memories"}, apiKey, appId);
-          const topK = args.limit ?? args.top_k ?? 10;
-          const filters = readScopeFilters(args);
+          const topK = resolvedArgs.limit ?? resolvedArgs.top_k ?? 10;
+          const filters = readScopeFilters(resolvedArgs);
 
-          const res = await mem0.search(args.query, {
+          const res = await mem0.search(resolvedArgs.query, {
             filters,
             topK,
           });
@@ -500,12 +514,13 @@ Identity context (resolved at plugin startup):
           scope: tool.schema.string().optional().describe('Scope: "project" (default), "session", or "global" (across ALL your projects). Use "global" only when explicitly asked.'),
         },
         async execute(args) {
+          const resolvedArgs = withDefaultAgentId(args);
           captureEvent("tool_use", {tool: "get_memories"}, apiKey, appId);
-          const filters = readScopeFilters(args);
+          const filters = readScopeFilters(resolvedArgs);
 
           const res = await mem0.getAll({
-            page: args.page,
-            pageSize: args.page_size,
+            page: resolvedArgs.page,
+            pageSize: resolvedArgs.page_size,
             filters,
           });
           return JSON.stringify(res);
@@ -563,14 +578,15 @@ Identity context (resolved at plugin startup):
           scope: tool.schema.string().optional().describe('Scope to delete: "project" (default), "session", or "global" (user-wide). Use "global" only when explicitly asked.'),
         },
         async execute(args) {
+          const resolvedArgs = withDefaultAgentId(args);
           if (dreamTriggered) dreamWriteSeen = true;
           captureEvent("tool_use", {tool: "delete_all_memories"}, apiKey, appId);
-          const sp = args.scope ? scopeWriteParams(asScope(args.scope), userId, appId, sessionId) : null;
+          const sp = resolvedArgs.scope ? scopeWriteParams(asScope(resolvedArgs.scope), userId, appId, sessionId) : null;
           const res = await mem0.deleteAll({
-            user_id: sp ? sp.user_id : (args.agent_id ? args.user_id : (args.user_id ?? userId)),
-            app_id: sp ? sp.app_id : (args.app_id ?? appId),
+            user_id: sp ? sp.user_id : (resolvedArgs.agent_id ? resolvedArgs.user_id : (resolvedArgs.user_id ?? userId)),
+            app_id: sp ? sp.app_id : (resolvedArgs.app_id ?? appId),
             run_id: sp?.run_id,
-            agent_id: args.agent_id,
+            agent_id: resolvedArgs.agent_id,
           } as any);
           return JSON.stringify(res);
         }

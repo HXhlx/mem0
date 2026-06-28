@@ -2,6 +2,14 @@
 
 All notable changes to the `@mem0/opencode-plugin` will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- **Configurable OpenCode identity.** The plugin now resolves `user_id` from tool args, plugin tuple options, `~/.mem0/settings.json` (`identity.by_app`, `identity.by_editor.opencode`, `identity.default.user_id`), `MEM0_USER_ID`, then OS username. `app_id` supports plugin options, `identity.default.app_id`, `MEM0_APP_ID`, then git-derived fallback. Optional `agent_id` supports plugin options, `identity.by_editor.opencode.agent_id`, `identity.default.agent_id`, then `MEM0_AGENT_ID`.
+- **`/mem0-user` skill.** Views the active `user_id` / `app_id` / `agent_id` and source, writes OpenCode-specific defaults to `~/.mem0/settings.json`, supports per-app overrides, and documents restart requirements.
+- **Identity source env exports.** `shell.env` now exposes `MEM0_USER_ID_SOURCE`, `MEM0_APP_ID_SOURCE`, and `MEM0_AGENT_ID_SOURCE` for troubleshooting.
+
 ## 0.2.0 — Native SDK tools, MCP-free, leaner skill set
 
 ### Changed (breaking)
