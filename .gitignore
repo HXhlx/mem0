@@ -197,3 +197,4 @@ DEPLOYMENT.local.md
 
 # Local working copies and artifacts (root-level only — do NOT match integrations/mem0-plugin/)
 /uv.lock
+/mem0-mcp-bak/

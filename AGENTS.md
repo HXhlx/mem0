@@ -18,7 +18,7 @@ This is a **polyglot monorepo** containing Python and TypeScript packages, CLIs,
 
 | Directory | Description |
 |-----------|-------------|
-| `mem0/` | Core Python SDK (`mem0ai` on PyPI) — memory, LLMs, embeddings, vector stores, graphs, rerankers |
+| `mem0/` | Core Python SDK (`mem0ai` on PyPI) — memory, LLMs, embeddings, vector stores, entity stores, rerankers |
 | `mem0-ts/` | TypeScript SDK (`mem0ai` on npm) — client + OSS memory |
 | `cli/python/` | Python CLI (`mem0-cli` on PyPI) — Typer-based, entry point `mem0` |
 | `cli/node/` | Node CLI (`@mem0/cli` on npm) — Commander-based, entry point `mem0` |
@@ -27,7 +27,7 @@ This is a **polyglot monorepo** containing Python and TypeScript packages, CLIs,
 | `integrations/openclaw/` | `@mem0/openclaw-mem0` — OpenClaw plugin for Claude Code / AI editors |
 | `integrations/pi-agent-plugin/` | `@mem0/pi-agent-plugin` — Pi Agent plugin |
 | `integrations/vercel-ai-sdk/` | `@mem0/vercel-ai-provider` — Vercel AI SDK memory provider |
-| `server/` | FastAPI REST server for self-hosted Mem0 (Docker: FastAPI + PostgreSQL/pgvector + Neo4j) |
+| `server/` | FastAPI REST server for self-hosted Mem0 (Docker: FastAPI + PostgreSQL/pgvector) |
 | `openmemory/` | Self-hosted memory platform — `api/` (FastAPI + Alembic + MCP server) and `ui/` (Next.js 15 + React 19) |
 | `skills/` | Claude Code skill definitions. Reference skills (SDK knowledge, always-on): `mem0/`, `mem0-cli/`, `mem0-vercel-ai-sdk/`. Pipeline skills (run on demand): `mem0-integrate/`, `mem0-test-integration/`, `mem0-oss-to-platform/` |
 | `docs/` | Documentation site (Mintlify) |
@@ -45,8 +45,7 @@ mem0 (Python SDK)          mem0-ts (TypeScript SDK)
 ├── mem0/llms/             └── src/oss/           (Memory — self-hosted)
 ├── mem0/embeddings/           ├── src/llms/
 ├── mem0/vector_stores/        ├── src/embeddings/
-├── mem0/graphs/               ├── src/vector_stores/
-└── mem0/reranker/             └── src/graphs/
+└── mem0/reranker/             └── src/vector_stores/
 
 cli/python/ ──▶ mem0ai (optional, for OSS mode)
 cli/node/   ──▶ mem0ai (npm, for API calls)
@@ -202,16 +201,15 @@ cd server
 make build                         # docker build -t mem0-api-server .
 make run_local                     # docker run -p 8000:8000 with .env
 
-# Docker Compose development (FastAPI + PostgreSQL/pgvector + Neo4j)
+# Docker Compose development (FastAPI + PostgreSQL/pgvector)
 cd server
 docker-compose up                  # starts all 3 services
 # mem0 API: localhost:8888
 # PostgreSQL: localhost:8432
-# Neo4j HTTP: localhost:8474, Bolt: localhost:8687
 ```
 
 - **Framework:** FastAPI with uvicorn (auto-reload in dev)
-- **Services:** PostgreSQL with pgvector, Neo4j 5.x with APOC plugin
+- **Services:** PostgreSQL with pgvector
 - **Hot reload:** Dev Dockerfile mounts `server/` and `mem0/` for live changes
 
 ### OpenMemory (`openmemory/`)
@@ -325,7 +323,7 @@ python -m benchmarks.beam.run --project-name my-test --backend cloud --mem0-api-
 
 ### Python Conventions
 
-- **Provider pattern:** All providers (LLMs, embeddings, vector stores, graphs, rerankers) inherit from a `base.py` abstract class in their directory. Config classes live in `configs.py`.
+- **Provider pattern:** All providers (LLMs, embeddings, vector stores, entity stores, rerankers) inherit from a `base.py` abstract class in their directory. Config classes live in `configs.py`.
 - **Pydantic v2** for all data models and configuration.
 - **Ruff** is the single linting and formatting tool — no black, no flake8.
   - Root SDK: line length **120**
@@ -359,23 +357,24 @@ cd <package> && pnpm run typecheck    # or: tsc --noEmit
 
 ### Provider Pattern
 
-The SDK uses a consistent plugin architecture across 5 categories. Each category has a `base.py` abstract class and concrete provider implementations:
+The SDK uses a consistent plugin architecture across 4 categories. Each category has a `base.py` abstract class and concrete provider implementations:
 
 | Category | Count | Examples |
 |----------|-------|---------|
 | **LLMs** | 24 | OpenAI, Anthropic, AWS Bedrock, Azure OpenAI, Gemini, Groq, Ollama, Together, DeepSeek, vLLM, LiteLLM, LM Studio, xAI |
 | **Vector Stores** | 30 | Qdrant, Pinecone, Chroma, Weaviate, Milvus, MongoDB, Redis, Elasticsearch, pgvector, Supabase, Faiss, S3 Vectors |
 | **Embeddings** | 15 | OpenAI, Azure OpenAI, Gemini, HuggingFace, FastEmbed, Together, AWS Bedrock, Ollama, Vertex AI |
-| **Graph Stores** | 4 | Neo4j, Memgraph, Kuzu, Apache AGE |
 | **Rerankers** | 5 | Cohere, HuggingFace, LLM-based, Sentence Transformer, Zero Entropy |
+
+> **Note (v3):** Graph stores (Neo4j, Memgraph, Kuzu, Apache AGE, Neptune) were removed in commit `59880a6f` (2026-04-13, "TS SDK v3 port, graph store removal"). Relationship-aware retrieval is now handled by the **Entity Store** — a second vector collection using the same provider as the primary vector store, created automatically via `Memory.entity_store` (`mem0/memory/main.py:479`). Entities are extracted via `mem0/utils/entity_extraction.py` (`extract_entities` / `extract_entities_batch`) and recalled through hybrid search (semantic + BM25 + entity boost) with additive scoring. No separate database or `graph_store` config field required.
 
 ### Two Usage Modes
 
 Self-hosted `Memory` / `AsyncMemory` classes and hosted-platform `MemoryClient` — both in Python and TypeScript.
 
-### Graph Memory
+### Entity Store (v3)
 
-Optional layer on top of vector memory for relationship-aware retrieval. Configured via the `graph` section of `MemoryConfig`.
+Replaces the removed graph store layer (v2's Neo4j/Memgraph/Kuzu/Apache AGE/Neptune integrations). A second vector collection created automatically by `Memory.entity_store` (`mem0/memory/main.py:479`) using the same vector store provider and client as the primary store. Collection naming follows `<provider>_<collection>_entities` (see `_entity_collection_name()`). Entities are extracted from messages via `extract_entities` / `extract_entities_batch` (`mem0/utils/entity_extraction.py`) and persisted alongside memories, then boosted during hybrid search (semantic + BM25 + entity boost) with additive scoring. No separate database, config field, or `graph_store` section required.
 
 ### MCP Integration
 
